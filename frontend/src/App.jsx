@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import io from "socket.io-client";
 
 const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000"; // backend url
+  import.meta.env.VITE_API_URL ||
+  "https://whatsapp-clone-production-7cdd.up.railway.app";
+
 
 const socket = io(API_URL, {
   transports: ["websocket"],
