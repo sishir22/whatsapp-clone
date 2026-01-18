@@ -1,22 +1,34 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:5000");
+const BACKEND_URL =
+  import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+
+const socket = io(BACKEND_URL, {
+  transports: ["websocket"],
+});
 
 export default function App() {
-  const [name, setName] = useState("");
-  const [text, setText] = useState("");
+  const [sender, setSender] = useState("Sishir");
+  const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
 
-  // ✅ Load old messages from DB when app opens
+  // Fetch old messages
   useEffect(() => {
-    fetch("http://localhost:5000/messages")
-      .then((res) => res.json())
-      .then((data) => setMessages(data))
-      .catch((err) => console.log("Error loading messages:", err));
+    const fetchMessages = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/messages`);
+        const data = await res.json();
+        setMessages(data);
+      } catch (err) {
+        console.log("Error fetching messages:", err);
+      }
+    };
+
+    fetchMessages();
   }, []);
 
-  // ✅ Socket listeners
+  // Socket listeners
   useEffect(() => {
     socket.on("receive_message", (data) => {
       setMessages((prev) => [...prev, data]);
@@ -24,7 +36,7 @@ export default function App() {
 
     socket.on("message_deleted", (id) => {
       setMessages((prev) =>
-        prev.map((m) => (m._id === id ? { ...m, deleted: true } : m))
+        prev.map((msg) => (msg._id === id ? { ...msg, deleted: true } : msg))
       );
     });
 
@@ -35,17 +47,19 @@ export default function App() {
   }, []);
 
   const sendMessage = () => {
-    if (!name.trim() || !text.trim()) return;
+    if (!sender.trim() || !message.trim()) return;
 
-    const msg = {
-      sender: name,
-      message: text,
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      deleted: false,
+    const msgData = {
+      sender,
+      message,
+      time: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
     };
 
-    socket.emit("send_message", msg);
-    setText("");
+    socket.emit("send_message", msgData);
+    setMessage("");
   };
 
   const deleteMessage = (id) => {
@@ -53,89 +67,105 @@ export default function App() {
   };
 
   return (
-    <div style={{ padding: 20, fontFamily: "Arial" }}>
-      <h2>WhatsApp Clone - Realtime Chat ✅</h2>
+    <div style={{ background: "#111", color: "white", minHeight: "100vh", padding: "30px" }}>
+      <h1 style={{ fontSize: "30px", marginBottom: "15px" }}>
+        WhatsApp Clone - Realtime Chat ✅
+      </h1>
 
       <input
+        value={sender}
+        onChange={(e) => setSender(e.target.value)}
         placeholder="Your name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        style={{ padding: 10, width: 300, marginBottom: 10 }}
+        style={{
+          padding: "10px",
+          width: "300px",
+          marginBottom: "15px",
+          borderRadius: "8px",
+          border: "1px solid #444",
+          background: "#222",
+          color: "white",
+        }}
       />
 
       <div
         style={{
-          border: "1px solid #ccc",
-          width: 450,
-          height: 350,
-          padding: 10,
+          width: "500px",
+          height: "400px",
+          border: "1px solid #444",
+          borderRadius: "10px",
+          padding: "10px",
           overflowY: "auto",
-          marginBottom: 10,
+          background: "#1b1b1b",
         }}
       >
-        {messages.map((m) => (
+        {messages.map((msg) => (
           <div
-            key={m._id}
+            key={msg._id}
             style={{
-              marginBottom: 10,
-              padding: 10,
-              borderRadius: 10,
-              background: m.sender === name ? "#dcf8c6" : "#fff",
-              maxWidth: 300,
-              marginLeft: m.sender === name ? "auto" : "0",
-              boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-              position: "relative",
-              color: "#111",
+              background: msg.deleted ? "#555" : "#2a2a2a",
+              padding: "10px",
+              borderRadius: "10px",
+              marginBottom: "10px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
             }}
           >
-            <b style={{ color: "#075E54" }}>{m.sender}</b>
-            <div style={{ marginTop: 5 }}>
-              {m.deleted ? (
-                <i style={{ color: "gray" }}>Message removed</i>
-              ) : (
-                m.message
+            <div>
+              <b>{msg.sender}:</b>{" "}
+              {msg.deleted ? <i>Message deleted</i> : msg.message}
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <small style={{ opacity: 0.7 }}>{msg.time}</small>
+              {!msg.deleted && (
+                <button
+                  onClick={() => deleteMessage(msg._id)}
+                  style={{
+                    padding: "5px 10px",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: "red",
+                    color: "white",
+                  }}
+                >
+                  Delete
+                </button>
               )}
             </div>
-
-            <div style={{ fontSize: 12, color: "#555", marginTop: 5 }}>
-              {m.time}
-            </div>
-
-            {!m.deleted && (
-              <button
-                onClick={() => deleteMessage(m._id)}
-                style={{
-                  position: "absolute",
-                  top: 5,
-                  right: 8,
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  fontSize: 16,
-                  color: "red",
-                }}
-              >
-                ❌
-              </button>
-            )}
           </div>
         ))}
       </div>
 
-      <input
-        placeholder="Type message..."
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        style={{ padding: 10, width: 300 }}
-        onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-      />
-
-      <button
-        onClick={sendMessage}
-        style={{ padding: 10, marginLeft: 10, cursor: "pointer" }}
-      >
-        Send
-      </button>
+      <div style={{ marginTop: "15px", display: "flex", gap: "10px" }}>
+        <input
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Type message..."
+          style={{
+            padding: "10px",
+            width: "350px",
+            borderRadius: "8px",
+            border: "1px solid #444",
+            background: "#222",
+            color: "white",
+          }}
+        />
+        <button
+          onClick={sendMessage}
+          style={{
+            padding: "10px 20px",
+            borderRadius: "8px",
+            border: "none",
+            cursor: "pointer",
+            background: "green",
+            color: "white",
+          }}
+        >
+          Send
+        </button>
+      </div>
     </div>
   );
 }
