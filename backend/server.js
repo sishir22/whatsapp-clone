@@ -1,4 +1,3 @@
-import authRoutes from "./routes/auth.js";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -6,14 +5,17 @@ import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 
+// ✅ import auth routes
+import authRoutes from "./routes/auth.js";
+
 dotenv.config();
 
 const app = express();
 
-// ✅ Allowed Frontend URLs (localhost + deployed)
+// ✅ Allowed Frontend URLs (localhost + Vercel)
 const allowedOrigins = [
   "http://localhost:5173",
-  process.env.CLIENT_URL, // your Vercel frontend url will be here
+  process.env.CLIENT_URL, // your Vercel frontend url
 ].filter(Boolean);
 
 // ✅ Express CORS
@@ -26,8 +28,6 @@ app.use(
 );
 
 app.use(express.json());
-app.use("/auth", authRoutes);
-
 
 const server = http.createServer(app);
 
@@ -46,7 +46,7 @@ mongoose
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.log("❌ MongoDB Error:", err));
 
-// ✅ Schema + Model
+// ✅ Schema + Model (Messages)
 const messageSchema = new mongoose.Schema(
   {
     sender: String,
@@ -63,6 +63,11 @@ const Message = mongoose.model("Message", messageSchema);
 app.get("/", (req, res) => {
   res.send("✅ Backend is running!");
 });
+
+// ✅ AUTH ROUTES
+// Register -> POST /auth/register
+// Login -> POST /auth/login
+app.use("/auth", authRoutes);
 
 // ✅ API: get all messages
 app.get("/messages", async (req, res) => {
