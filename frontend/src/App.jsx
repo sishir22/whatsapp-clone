@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import io from "socket.io-client";
 
 const API_URL =
-  import.meta.env.VITE_API_URL ||
-  "https://whatsapp-clone-production-7cdd.up.railway.app";
+  import.meta.env.VITE_API_URL || "https://whatsapp-clone-production-7cdd.up.railway.app";
+
+// socket (only used after login)
+let socket;
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
-  const [mode, setMode] = useState("login"); // login | register
+  const [mode, setMode] = useState("register"); // register | login
 
   // auth inputs
   const [username, setUsername] = useState("");
@@ -22,18 +24,12 @@ export default function App() {
 
   const myName = useMemo(() => username.trim().toLowerCase(), [username]);
 
-  // socket (only when logged in)
-  const socket = useMemo(() => {
-    if (!token) return null;
-    return io(API_URL, { transports: ["websocket"] });
-  }, [token]);
-
   const timeNow = () => {
     const d = new Date();
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
-  // fetch old messages after login
+  // ✅ Fetch old messages (only when logged in)
   useEffect(() => {
     if (!token) return;
 
@@ -51,9 +47,13 @@ export default function App() {
     loadMessages();
   }, [token]);
 
-  // socket listeners
+  // ✅ Setup socket after login
   useEffect(() => {
-    if (!socket) return;
+    if (!token) return;
+
+    socket = io(API_URL, {
+      transports: ["websocket"],
+    });
 
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
@@ -69,33 +69,35 @@ export default function App() {
     });
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("receive_message");
-      socket.off("message_deleted");
-      socket.disconnect();
+      if (socket) socket.disconnect();
     };
-  }, [socket]);
+  }, [token]);
 
-  // scroll bottom
+  // auto scroll
   useEffect(() => {
     if (!chatRef.current) return;
     chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
-  // register
-  const registerUser = async () => {
+  // ✅ Register
+  const handleRegister = async () => {
+    if (!username.trim() || !password.trim()) return alert("Fill all fields");
+
     try {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
 
       const data = await res.json();
-      if (!res.ok) return alert(data.error || "Register failed");
 
-      alert("Registered successfully ✅ Now login");
+      if (!res.ok) {
+        alert(data?.error || "Register error");
+        return;
+      }
+
+      alert("✅ Registered! Now login.");
       setMode("login");
     } catch (err) {
       alert("Register error");
@@ -103,27 +105,35 @@ export default function App() {
     }
   };
 
-  // login
-  const loginUser = async () => {
+  // ✅ Login
+  const handleLogin = async () => {
+    if (!username.trim() || !password.trim()) return alert("Fill all fields");
+
     try {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
 
       const data = await res.json();
-      if (!res.ok) return alert(data.error || "Login failed");
+
+      if (!res.ok) {
+        alert(data?.error || "Login error");
+        return;
+      }
 
       localStorage.setItem("token", data.token);
       setToken(data.token);
-      alert("Login success ✅");
+
+      alert("✅ Login successful!");
     } catch (err) {
       alert("Login error");
       console.log(err);
     }
   };
 
+  // ✅ Logout
   const logout = () => {
     localStorage.removeItem("token");
     setToken("");
@@ -131,10 +141,10 @@ export default function App() {
     setConnected(false);
   };
 
+  // ✅ Send message
   const sendMessage = () => {
-    if (!socket) return;
-    if (!username.trim()) return alert("Enter username");
     if (!message.trim()) return;
+    if (!socket) return;
 
     const payload = {
       sender: username.trim(),
@@ -151,54 +161,63 @@ export default function App() {
     socket.emit("delete_message", id);
   };
 
-  // =========================
-  // UI: AUTH SCREEN
-  // =========================
+  // -------------------------
+  // AUTH SCREEN (NO TOKEN)
+  // -------------------------
   if (!token) {
     return (
       <div style={styles.page}>
         <div style={styles.phone}>
+          {/* Header */}
           <div style={styles.header}>
-            <div>
-              <div style={styles.title}>Pulse Chat</div>
-              <div style={styles.subTitle}>
-                {mode === "login" ? "Login to continue" : "Create new account"}
+            <div style={styles.headerLeft}>
+              <div style={styles.avatar}>
+                {username?.trim()?.[0]?.toUpperCase() || "P"}
+              </div>
+              <div>
+                <div style={styles.title}>Pulse Chat</div>
+                <div style={styles.subTitle}>
+                  {mode === "register"
+                    ? "Create new account"
+                    : "Login to continue"}
+                </div>
               </div>
             </div>
           </div>
 
-          <div style={styles.authBox}>
+          <div style={{ padding: "18px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
             <input
-              style={styles.input}
-              placeholder="Username"
+              style={styles.nameInput}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-            />
-            <input
-              style={styles.input}
-              placeholder="Password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Username"
             />
 
-            {mode === "login" ? (
-              <button style={styles.primaryBtn} onClick={loginUser}>
-                Login
+            <input
+              style={styles.nameInput}
+              value={password}
+              type="password"
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+            />
+
+            {mode === "register" ? (
+              <button style={styles.bigBtn} onClick={handleRegister}>
+                Register
               </button>
             ) : (
-              <button style={styles.primaryBtn} onClick={registerUser}>
-                Register
+              <button style={styles.bigBtn} onClick={handleLogin}>
+                Login
               </button>
             )}
 
             <button
-              style={styles.secondaryBtn}
-              onClick={() => setMode(mode === "login" ? "register" : "login")}
+              style={styles.switchBtn}
+              onClick={() => setMode(mode === "register" ? "login" : "register")}
             >
-              {mode === "login"
-                ? "New user? Register"
-                : "Already have account? Login"}
+              {mode === "register"
+                ? "Already have account? Login"
+                : "New here? Register"}
             </button>
           </div>
         </div>
@@ -206,9 +225,9 @@ export default function App() {
     );
   }
 
-  // =========================
-  // UI: CHAT SCREEN
-  // =========================
+  // -------------------------
+  // CHAT SCREEN (TOKEN)
+  // -------------------------
   return (
     <div style={styles.page}>
       <div style={styles.phone}>
@@ -231,57 +250,63 @@ export default function App() {
           </button>
         </div>
 
-        {/* Chat */}
+        {/* Chat Area */}
         <div ref={chatRef} style={styles.chatArea}>
-          {messages.map((m) => {
-            const isMe = m.sender?.trim()?.toLowerCase() === myName;
-
-            return (
-              <div
-                key={m._id}
-                style={{
-                  display: "flex",
-                  justifyContent: isMe ? "flex-end" : "flex-start",
-                  marginBottom: 10,
-                }}
-              >
+          {messages
+            .filter((m) => !m.deleted)
+            .map((m) => {
+              const isMe = m.sender?.trim()?.toLowerCase() === myName;
+              return (
                 <div
+                  key={m._id}
                   style={{
-                    ...styles.bubble,
-                    background: isMe
-                      ? "linear-gradient(135deg, rgba(120,80,255,0.55), rgba(0,255,200,0.25))"
-                      : "rgba(255,255,255,0.06)",
-                    opacity: m.deleted ? 0.55 : 1,
+                    ...styles.msgRow,
+                    justifyContent: isMe ? "flex-end" : "flex-start",
                   }}
                 >
-                  <div style={styles.senderLine}>
-                    <span style={{ fontWeight: 800 }}>{m.sender}</span>
-                    <span style={styles.time}>{m.time}</span>
-                  </div>
+                  <div
+                    style={{
+                      ...styles.bubble,
+                      ...(isMe ? styles.bubbleMe : styles.bubbleOther),
+                    }}
+                  >
+                    <div style={styles.senderLine}>
+                      <span style={{ opacity: 0.9, fontWeight: 700 }}>
+                        {m.sender}
+                      </span>
+                      <span style={styles.time}>{m.time}</span>
+                    </div>
 
-                  <div style={styles.text}>
-                    {m.deleted ? (
-                      <i style={{ opacity: 0.8 }}>message deleted</i>
-                    ) : (
-                      m.message
-                    )}
-                  </div>
+                    <div style={styles.text}>{m.message}</div>
 
-                  {!m.deleted && (
-                    <button
-                      style={styles.deleteBtn}
-                      onClick={() => deleteMessage(m._id)}
-                    >
-                      Delete
-                    </button>
-                  )}
+                    <div style={styles.actions}>
+                      <button
+                        style={{
+                          ...styles.deleteBtn,
+                          ...(isMe ? styles.deleteMe : styles.deleteOther),
+                        }}
+                        onClick={() => deleteMessage(m._id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 </div>
+              );
+            })}
+
+          {messages.filter((m) => !m.deleted).length === 0 && (
+            <div style={styles.emptyState}>
+              <div style={styles.emptyGlow} />
+              <div style={styles.emptyText}>No messages yet ✨</div>
+              <div style={styles.emptyHint}>
+                Send first message and test realtime chat.
               </div>
-            );
-          })}
+            </div>
+          )}
         </div>
 
-        {/* Input */}
+        {/* Input Bar */}
         <div style={styles.inputBar}>
           <input
             style={styles.msgInput}
@@ -295,6 +320,18 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      <style>{`
+        @keyframes popIn {
+          from { transform: translateY(10px) scale(0.98); opacity: 0; }
+          to { transform: translateY(0px) scale(1); opacity: 1; }
+        }
+        @keyframes glow {
+          0% { transform: scale(1); opacity: 0.35; }
+          50% { transform: scale(1.05); opacity: 0.55; }
+          100% { transform: scale(1); opacity: 0.35; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -353,12 +390,14 @@ const styles = {
     color: "white",
     background:
       "linear-gradient(135deg, rgba(120,80,255,1), rgba(0,255,200,0.9))",
+    boxShadow: "0 10px 25px rgba(120,80,255,0.25)",
   },
 
   title: {
     fontSize: 16,
-    fontWeight: 900,
+    fontWeight: 800,
     color: "white",
+    letterSpacing: 0.3,
   },
 
   subTitle: {
@@ -368,23 +407,17 @@ const styles = {
   },
 
   logoutBtn: {
-    background: "rgba(255,255,255,0.08)",
-    color: "white",
-    border: "1px solid rgba(255,255,255,0.12)",
     padding: "8px 12px",
     borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.08)",
+    color: "white",
     cursor: "pointer",
     fontWeight: 700,
   },
 
-  authBox: {
-    padding: 18,
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-  },
-
-  input: {
+  nameInput: {
+    width: "100%",
     padding: "12px 14px",
     borderRadius: 16,
     outline: "none",
@@ -394,22 +427,27 @@ const styles = {
     fontSize: 14,
   },
 
-  primaryBtn: {
+  bigBtn: {
+    width: "100%",
     padding: "12px 14px",
-    borderRadius: 16,
+    borderRadius: 18,
     border: "none",
     cursor: "pointer",
+    fontSize: 15,
     fontWeight: 900,
     color: "black",
     background:
       "linear-gradient(135deg, rgba(0,255,200,1), rgba(120,80,255,1))",
+    boxShadow: "0 10px 25px rgba(0,255,200,0.15)",
   },
 
-  secondaryBtn: {
+  switchBtn: {
+    width: "100%",
     padding: "12px 14px",
-    borderRadius: 16,
+    borderRadius: 18,
     border: "1px solid rgba(255,255,255,0.12)",
     cursor: "pointer",
+    fontSize: 14,
     fontWeight: 800,
     color: "white",
     background: "rgba(255,255,255,0.05)",
@@ -424,20 +462,40 @@ const styles = {
     gap: 10,
   },
 
+  msgRow: {
+    display: "flex",
+    width: "100%",
+  },
+
   bubble: {
     maxWidth: "85%",
     padding: "10px 12px",
     borderRadius: 18,
+    animation: "popIn 0.22s ease-out",
     border: "1px solid rgba(255,255,255,0.10)",
+  },
+
+  bubbleMe: {
+    background:
+      "linear-gradient(135deg, rgba(120,80,255,0.55), rgba(0,255,200,0.25))",
+    boxShadow: "0 10px 30px rgba(120,80,255,0.18)",
+    borderTopRightRadius: 8,
+  },
+
+  bubbleOther: {
+    background: "rgba(255,255,255,0.06)",
+    boxShadow: "0 10px 25px rgba(0,0,0,0.25)",
+    borderTopLeftRadius: 8,
   },
 
   senderLine: {
     display: "flex",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
     fontSize: 12,
-    marginBottom: 6,
     color: "rgba(255,255,255,0.9)",
+    marginBottom: 6,
   },
 
   time: {
@@ -452,15 +510,28 @@ const styles = {
     wordBreak: "break-word",
   },
 
-  deleteBtn: {
+  actions: {
     marginTop: 10,
+    display: "flex",
+    justifyContent: "flex-end",
+  },
+
+  deleteBtn: {
     padding: "6px 10px",
     borderRadius: 999,
     border: "none",
     cursor: "pointer",
     fontWeight: 700,
     fontSize: 12,
+  },
+
+  deleteMe: {
     background: "rgba(255,60,180,0.25)",
+    color: "white",
+  },
+
+  deleteOther: {
+    background: "rgba(255,255,255,0.10)",
     color: "white",
   },
 
@@ -493,5 +564,38 @@ const styles = {
     color: "black",
     background:
       "linear-gradient(135deg, rgba(0,255,200,1), rgba(120,80,255,1))",
+    boxShadow: "0 10px 25px rgba(0,255,200,0.15)",
+  },
+
+  emptyState: {
+    marginTop: 30,
+    padding: 20,
+    borderRadius: 20,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.04)",
+    position: "relative",
+    overflow: "hidden",
+  },
+
+  emptyGlow: {
+    position: "absolute",
+    inset: -40,
+    background:
+      "radial-gradient(circle at 30% 30%, rgba(120,80,255,0.35), transparent 45%), radial-gradient(circle at 70% 70%, rgba(0,255,200,0.18), transparent 45%)",
+    animation: "glow 2.5s ease-in-out infinite",
+  },
+
+  emptyText: {
+    position: "relative",
+    color: "white",
+    fontWeight: 900,
+    fontSize: 14,
+  },
+
+  emptyHint: {
+    position: "relative",
+    marginTop: 6,
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
   },
 };
