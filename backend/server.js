@@ -22,15 +22,11 @@ const allowedOrigins = [
 // ✅ CORS FIX (handles preflight properly)
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // allow Postman/server calls
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("CORS not allowed: " + origin));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
   })
 );
+
 
 app.options("*", cors()); // ✅ important for preflight
 
