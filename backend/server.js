@@ -1,3 +1,4 @@
+import authRoutes from "./routes/auth.js";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -8,15 +9,34 @@ import mongoose from "mongoose";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+// ✅ Allowed Frontend URLs (localhost + deployed)
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.CLIENT_URL, // your Vercel frontend url will be here
+].filter(Boolean);
+
+// ✅ Express CORS
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
+app.use("/auth", authRoutes);
+
 
 const server = http.createServer(app);
 
+// ✅ Socket.IO CORS
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
@@ -38,6 +58,11 @@ const messageSchema = new mongoose.Schema(
 );
 
 const Message = mongoose.model("Message", messageSchema);
+
+// ✅ API: check server is alive
+app.get("/", (req, res) => {
+  res.send("✅ Backend is running!");
+});
 
 // ✅ API: get all messages
 app.get("/messages", async (req, res) => {
@@ -76,6 +101,9 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(process.env.PORT || 5000, () => {
-  console.log("🚀 Server running on port", process.env.PORT || 5000);
+// ✅ Railway PORT
+const PORT = process.env.PORT || 5000;
+
+server.listen(PORT, () => {
+  console.log("🚀 Server running on port", PORT);
 });
