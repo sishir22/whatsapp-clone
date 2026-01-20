@@ -5,33 +5,42 @@ import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 
-// ✅ import auth routes
-import authRoutes from "./routes/auth.js";
+import authRoutes from "./routes/auth.js"; // ✅ auth routes
 
 dotenv.config();
 
 const app = express();
 
-// ✅ Allowed Frontend URLs (localhost + Vercel)
+/* =========================
+   ✅ Allowed Origins (CORS)
+========================= */
 const allowedOrigins = [
   "http://localhost:5173",
-  process.env.CLIENT_URL, // your Vercel frontend url
+  process.env.CLIENT_URL, // Vercel frontend url
 ].filter(Boolean);
 
-// ✅ Express CORS
+// ✅ CORS FIX (handles preflight properly)
 app.use(
   cors({
-    origin: allowedOrigins,
-    methods: ["GET", "POST"],
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true); // allow Postman/server calls
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("CORS not allowed: " + origin));
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   })
 );
+
+app.options("*", cors()); // ✅ important for preflight
 
 app.use(express.json());
 
 const server = http.createServer(app);
 
-// ✅ Socket.IO CORS
+/* =========================
+   ✅ Socket.IO Setup
+========================= */
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
@@ -40,13 +49,17 @@ const io = new Server(server, {
   },
 });
 
-// ✅ MongoDB connect
+/* =========================
+   ✅ MongoDB Connect
+========================= */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.log("❌ MongoDB Error:", err));
 
-// ✅ Schema + Model (Messages)
+/* =========================
+   ✅ Message Schema + Model
+========================= */
 const messageSchema = new mongoose.Schema(
   {
     sender: String,
@@ -59,17 +72,19 @@ const messageSchema = new mongoose.Schema(
 
 const Message = mongoose.model("Message", messageSchema);
 
-// ✅ API: check server is alive
+/* =========================
+   ✅ Routes
+========================= */
+
+// health check
 app.get("/", (req, res) => {
   res.send("✅ Backend is running!");
 });
 
-// ✅ AUTH ROUTES
-// Register -> POST /auth/register
-// Login -> POST /auth/login
+// auth routes
 app.use("/auth", authRoutes);
 
-// ✅ API: get all messages
+// get all messages
 app.get("/messages", async (req, res) => {
   try {
     const msgs = await Message.find().sort({ createdAt: 1 });
@@ -79,7 +94,9 @@ app.get("/messages", async (req, res) => {
   }
 });
 
-// ✅ socket
+/* =========================
+   ✅ Socket Logic
+========================= */
 io.on("connection", (socket) => {
   console.log("🟢 User connected:", socket.id);
 
@@ -106,7 +123,9 @@ io.on("connection", (socket) => {
   });
 });
 
-// ✅ Railway PORT
+/* =========================
+   ✅ Start Server (Railway)
+========================= */
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
