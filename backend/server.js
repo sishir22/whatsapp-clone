@@ -13,99 +13,62 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// ✅ Allowed frontend origins (Vercel + local)
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://whatsapp-clone-fawn-three.vercel.app",
-];
-
-// ✅ Middlewares
 app.use(express.json());
 
-// ✅ CORS (FIXED for preflight + production)
+// ✅ IMPORTANT: put your Vercel URL here EXACTLY
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+
+// ✅ CORS FIX (works for preflight + register/login)
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // allow Postman/server calls
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("CORS blocked for origin: " + origin));
-    },
+    origin: FRONTEND_URL,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
 );
 
-// ✅ IMPORTANT: handle preflight
+// ✅ must handle OPTIONS (preflight)
 app.options("*", cors());
 
-// ✅ Routes
 app.get("/", (req, res) => {
-  res.send("Backend is running ✅");
+  res.send("Backend running ✅");
 });
 
 app.use("/auth", authRoutes);
 
-// ✅ Fetch messages
 app.get("/messages", async (req, res) => {
-  try {
-    const msgs = await Message.find().sort({ createdAt: 1 });
-    res.json(msgs);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const msgs = await Message.find().sort({ createdAt: 1 });
+  res.json(msgs);
 });
 
-// ✅ Socket.IO with CORS fixed
+// ✅ socket
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    origin: FRONTEND_URL,
+    methods: ["GET", "POST"],
     credentials: true,
   },
-  transports: ["websocket"],
 });
 
 io.on("connection", (socket) => {
-  console.log("✅ User connected:", socket.id);
+  console.log("connected:", socket.id);
 
-  // send message
   socket.on("send_message", async (data) => {
-    try {
-      const msg = await Message.create({
-        sender: data.sender,
-        message: data.message,
-        time: data.time,
-      });
-
-      io.emit("receive_message", msg);
-    } catch (err) {
-      console.log("❌ send_message error:", err.message);
-    }
+    const msg = await Message.create(data);
+    io.emit("receive_message", msg);
   });
 
-  // delete message
   socket.on("delete_message", async (id) => {
-    try {
-      await Message.findByIdAndUpdate(id, { deleted: true });
-      io.emit("message_deleted", id);
-    } catch (err) {
-      console.log("❌ delete_message error:", err.message);
-    }
-  });
-
-  socket.on("disconnect", () => {
-    console.log("❌ User disconnected:", socket.id);
+    await Message.findByIdAndUpdate(id, { deleted: true });
+    io.emit("message_deleted", id);
   });
 });
 
-// ✅ MongoDB connect
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.log("❌ MongoDB Error:", err.message));
+  .then(() => console.log("Mongo connected ✅"))
+  .catch((err) => console.log("Mongo error ❌", err.message));
 
-// ✅ Start server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log("Server running on", PORT));
