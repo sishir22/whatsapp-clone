@@ -6,8 +6,8 @@ import dotenv from "dotenv";
 import { Server } from "socket.io";
 
 import authRoutes from "./routes/auth.js";
-import usersRoutes from "./routes/users.js";
 import Message from "./models/message.js";
+import User from "./models/user.js";
 
 dotenv.config();
 
@@ -16,25 +16,21 @@ const server = http.createServer(app);
 
 app.use(express.json());
 
-// 🔥 FIXED CORS (supports multiple origins)
-const allowedOrigins = [
-  process.env.CLIENT_URL,
-  "http://localhost:5173",
-].filter(Boolean);
+// IMPORTANT: your vercel URL stored in Railway variable
+// You have CLIENT_URL in railway, so use that
+const FRONTEND_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
+// ✅ CORS for API
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("CORS blocked: " + origin));
-    },
-    credentials: true,
+    origin: FRONTEND_URL,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
   })
 );
 
+// ✅ handle OPTIONS preflight properly
 app.options("*", cors());
 
 app.get("/", (req, res) => {
@@ -42,43 +38,90 @@ app.get("/", (req, res) => {
 });
 
 app.use("/auth", authRoutes);
-app.use("/users", usersRoutes);
 
-// 🔥 Get messages by roomId
-app.get("/messages/:roomId", async (req, res) => {
+// ✅ Get all users list (for chat list)
+app.get("/users", async (req, res) => {
   try {
-    const { roomId } = req.params;
-    const msgs = await Message.find({ roomId }).sort({ createdAt: 1 });
+    const users = await User.find({}, { username: 1 }).sort({ username: 1 });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ Get messages between 2 users (1-1)
+app.get("/messages/:user1/:user2", async (req, res) => {
+  try {
+    const { user1, user2 } = req.params;
+
+    const msgs = await Message.find({
+      $or: [
+        { sender: user1, receiver: user2 },
+        { sender: user2, receiver: user1 },
+      ],
+    }).sort({ createdAt: 1 });
+
     res.json(msgs);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 🔥 Socket.io
+// ✅ SOCKET.IO with CORS
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: FRONTEND_URL,
+    methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
+// store online users (username -> socketId)
+const onlineUsers = new Map();
+
 io.on("connection", (socket) => {
   console.log("connected:", socket.id);
 
-  // join private room
-  socket.on("join_room", (roomId) => {
-    socket.join(roomId);
-    console.log("joined room:", roomId);
+  // ✅ user joins with username (VERY IMPORTANT)
+  socket.on("join", (username) => {
+    if (!username) return;
+
+    onlineUsers.set(username, socket.id);
+    socket.join(username); // room name = username
+    console.log(`✅ ${username} joined room: ${username}`);
   });
 
-  // send message
+  // ✅ send message only to receiver
   socket.on("send_message", async (data) => {
     try {
-      const msg = await Message.create(data);
-      io.to(data.roomId).emit("receive_message", msg);
+      const { sender, receiver, message, time } = data;
+
+      if (!sender || !receiver || !message) return;
+
+      const msg = await Message.create({
+        sender,
+        receiver,
+        message,
+        time,
+      });
+
+      // send to sender room (for instant update)
+      io.to(sender).emit("receive_message", msg);
+
+      // send to receiver room (THIS FIXES YOUR ISSUE)
+      io.to(receiver).emit("receive_message", msg);
     } catch (err) {
       console.log("send_message error:", err.message);
+    }
+  });
+
+  socket.on("disconnect", () => {
+    for (let [user, id] of onlineUsers.entries()) {
+      if (id === socket.id) {
+        onlineUsers.delete(user);
+        console.log("❌ disconnected:", user);
+        break;
+      }
     }
   });
 });
