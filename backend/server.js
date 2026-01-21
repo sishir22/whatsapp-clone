@@ -15,22 +15,35 @@ const server = http.createServer(app);
 
 app.use(express.json());
 
-// ✅ IMPORTANT: put your Vercel URL here EXACTLY
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+// ✅ allow multiple frontend origins (localhost + vercel)
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL, // your vercel url stored in railway env
+].filter(Boolean);
 
-// ✅ CORS FIX (works for preflight + register/login)
+// ✅ CORS (IMPORTANT)
 app.use(
   cors({
-    origin: FRONTEND_URL,
+    origin: function (origin, callback) {
+      // allow requests with no origin (like Postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        return callback(new Error("CORS blocked: " + origin));
+      }
+    },
+    credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
   })
 );
 
-// ✅ must handle OPTIONS (preflight)
+// ✅ FIX for Express v5 crash:
+// DO NOT use app.options("*", cors())
+// Instead use this:
 app.options(/.*/, cors());
-
 
 app.get("/", (req, res) => {
   res.send("Backend running ✅");
@@ -38,15 +51,16 @@ app.get("/", (req, res) => {
 
 app.use("/auth", authRoutes);
 
+// messages api
 app.get("/messages", async (req, res) => {
   const msgs = await Message.find().sort({ createdAt: 1 });
   res.json(msgs);
 });
 
-// ✅ socket
+// socket io
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_URL,
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },
