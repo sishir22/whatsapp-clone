@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import io from "socket.io-client";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
@@ -21,20 +20,9 @@ export default function App() {
   const [messages, setMessages] = useState([]);
 
   const chatRef = useRef(null);
+  const socketRef = useRef(null);
 
   const myName = useMemo(() => username.trim().toLowerCase(), [username]);
-
-  // socket init
-  const socket = useMemo(() => {
-    if (!token) return null;
-    return io(API_URL, { transports: ["websocket"] });
-  }, [token]);
-
-  // create roomId (same for both users)
-  const roomId = useMemo(() => {
-    if (!selectedUser || !myName) return "";
-    return [myName, selectedUser.username].sort().join("__");
-  }, [myName, selectedUser]);
 
   // auto scroll
   useEffect(() => {
@@ -43,48 +31,75 @@ export default function App() {
     }
   }, [messages]);
 
-  // fetch users after login
-  const fetchUsers = async () => {
+  // ✅ Fetch all users
+  const fetchUsers = async (currentUser) => {
     try {
       const res = await fetch(`${API_URL}/users`);
       const data = await res.json();
-      setUsers(data.filter((u) => u.username !== myName));
+
+      const me = (currentUser || myName || "").toLowerCase();
+      setUsers(Array.isArray(data) ? data.filter((u) => u.username !== me) : []);
     } catch (err) {
-      console.log(err);
+      console.log("users fetch error:", err);
+      setUsers([]);
     }
   };
 
-  // fetch messages when user selected
-  const fetchMessages = async () => {
-    if (!roomId) return;
+  // ✅ Fetch 1-1 messages between 2 users
+  const fetchMessages = async (otherUser) => {
+    if (!myName || !otherUser) return;
+
     try {
-      const res = await fetch(`${API_URL}/messages/${roomId}`);
+      const res = await fetch(
+        `${API_URL}/messages/${myName}/${otherUser.username}`
+      );
       const data = await res.json();
-      setMessages(data);
+      setMessages(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.log(err);
+      console.log("messages fetch error:", err);
+      setMessages([]);
     }
   };
 
-  // join room when selected user changes
+  // ✅ Setup socket ONLY after login
   useEffect(() => {
-    if (!socket || !roomId) return;
-    socket.emit("join_room", roomId);
-    fetchMessages();
-  }, [socket, roomId]);
+    if (!token || !myName) return;
 
-  // socket listeners
-  useEffect(() => {
-    if (!socket) return;
+    // create socket once
+    socketRef.current = io(API_URL, {
+      transports: ["websocket"],
+      withCredentials: true,
+    });
 
-    socket.on("receive_message", (msg) => {
+    // debug
+    socketRef.current.on("connect", () => {
+      console.log("✅ socket connected:", socketRef.current.id);
+
+      // 🔥 VERY IMPORTANT: join your username room
+      socketRef.current.emit("join", myName);
+    });
+
+    socketRef.current.on("connect_error", (err) => {
+      console.log("❌ socket connect_error:", err.message);
+    });
+
+    // receive messages (both sender + receiver will get)
+    socketRef.current.on("receive_message", (msg) => {
+      // show only if current chat is open with that user
       setMessages((prev) => [...prev, msg]);
     });
 
     return () => {
-      socket.off("receive_message");
+      socketRef.current?.disconnect();
+      socketRef.current = null;
     };
-  }, [socket]);
+  }, [token, myName]);
+
+  // when selecting a user, fetch their chat
+  useEffect(() => {
+    if (!selectedUser) return;
+    fetchMessages(selectedUser);
+  }, [selectedUser]);
 
   // login
   const login = async () => {
@@ -96,14 +111,16 @@ export default function App() {
       });
 
       const data = await res.json();
-
       if (!res.ok) return alert(data.error || "Login failed");
 
       localStorage.setItem("token", data.token);
       setToken(data.token);
+
+      // backend returns username
       setUsername(data.username);
 
-      setTimeout(fetchUsers, 300);
+      // load users list after login
+      setTimeout(() => fetchUsers(data.username), 200);
     } catch (err) {
       alert("Login error");
     }
@@ -119,7 +136,6 @@ export default function App() {
       });
 
       const data = await res.json();
-
       if (!res.ok) return alert(data.error || "Register failed");
 
       alert("Registered ✅ now login");
@@ -131,16 +147,22 @@ export default function App() {
 
   // send message
   const sendMessage = () => {
-    if (!socket || !message.trim() || !selectedUser) return;
+    if (!socketRef.current) return alert("Socket not connected ❌");
+    if (!selectedUser) return alert("Select a user first 😄");
+    if (!message.trim()) return;
 
     const payload = {
-      roomId,
       sender: myName,
       receiver: selectedUser.username,
       message: message.trim(),
+      time: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
     };
 
-    socket.emit("send_message", payload);
+    socketRef.current.emit("send_message", payload);
+
     setMessage("");
   };
 
@@ -152,6 +174,8 @@ export default function App() {
     setMessages([]);
     setUsername("");
     setPassword("");
+    socketRef.current?.disconnect();
+    socketRef.current = null;
   };
 
   // ---------------- UI ----------------
@@ -210,7 +234,7 @@ export default function App() {
           </button>
         </div>
 
-        <button style={styles.refresh} onClick={fetchUsers}>
+        <button style={styles.refresh} onClick={() => fetchUsers()}>
           Refresh Users
         </button>
 
@@ -225,7 +249,11 @@ export default function App() {
                     ? "2px solid #00ffd5"
                     : "1px solid rgba(255,255,255,0.1)",
               }}
-              onClick={() => setSelectedUser(u)}
+              onClick={() => {
+                setSelectedUser(u);
+                setMessages([]);
+                fetchMessages(u);
+              }}
             >
               {u.username}
             </div>
@@ -236,9 +264,7 @@ export default function App() {
       {/* right chat */}
       <div style={styles.chat}>
         {!selectedUser ? (
-          <div style={styles.empty}>
-            Select a user to start 1-1 chat 💬
-          </div>
+          <div style={styles.empty}>Select a user to start 1-1 chat 💬</div>
         ) : (
           <>
             <div style={styles.chatTop}>
@@ -246,22 +272,26 @@ export default function App() {
             </div>
 
             <div style={styles.messages} ref={chatRef}>
-              {messages.map((m) => (
-                <div
-                  key={m._id}
-                  style={{
-                    ...styles.msg,
-                    alignSelf:
-                      m.sender === myName ? "flex-end" : "flex-start",
-                    background:
-                      m.sender === myName
+              {messages.map((m) => {
+                const isMe = m.sender === myName;
+                return (
+                  <div
+                    key={m._id || Math.random()}
+                    style={{
+                      ...styles.msg,
+                      alignSelf: isMe ? "flex-end" : "flex-start",
+                      background: isMe
                         ? "linear-gradient(90deg,#00ffd5,#6c63ff)"
                         : "rgba(255,255,255,0.08)",
-                  }}
-                >
-                  {m.message}
-                </div>
-              ))}
+                    }}
+                  >
+                    <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>
+                      {isMe ? "You" : m.sender} • {m.time || ""}
+                    </div>
+                    {m.message}
+                  </div>
+                );
+              })}
             </div>
 
             <div style={styles.inputRow}>
