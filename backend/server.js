@@ -29,7 +29,8 @@ app.use(
 );
 
 // ✅ must handle OPTIONS (preflight)
-app.options("*", cors());
+app.options(/.*/, cors());
+
 
 app.get("/", (req, res) => {
   res.send("Backend running ✅");
