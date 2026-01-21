@@ -15,13 +15,13 @@ const server = http.createServer(app);
 
 app.use(express.json());
 
-// ✅ allow multiple frontend origins (localhost + vercel)
+// ✅ allow BOTH local + vercel
 const allowedOrigins = [
   "http://localhost:5173",
-  process.env.FRONTEND_URL, // your vercel url stored in railway env
+  process.env.FRONTEND_URL, // your vercel url
 ].filter(Boolean);
 
-// ✅ CORS (IMPORTANT)
+// ✅ CORS middleware (IMPORTANT)
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -34,16 +34,14 @@ app.use(
         return callback(new Error("CORS blocked: " + origin));
       }
     },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
   })
 );
 
-// ✅ FIX for Express v5 crash:
-// DO NOT use app.options("*", cors())
-// Instead use this:
-app.options(/.*/, cors());
+// ✅ DO NOT USE app.options(/.*/, cors())  (it crashes on Railway sometimes)
+app.options("*", cors());
 
 app.get("/", (req, res) => {
   res.send("Backend running ✅");
@@ -51,13 +49,12 @@ app.get("/", (req, res) => {
 
 app.use("/auth", authRoutes);
 
-// messages api
 app.get("/messages", async (req, res) => {
   const msgs = await Message.find().sort({ createdAt: 1 });
   res.json(msgs);
 });
 
-// socket io
+// ✅ socket.io CORS
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
