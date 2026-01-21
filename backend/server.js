@@ -16,11 +16,9 @@ const server = http.createServer(app);
 
 app.use(express.json());
 
-// IMPORTANT: your vercel URL stored in Railway variable
-// You have CLIENT_URL in railway, so use that
 const FRONTEND_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
-// ✅ CORS for API
+// ✅ CORS
 app.use(
   cors({
     origin: FRONTEND_URL,
@@ -30,7 +28,6 @@ app.use(
   })
 );
 
-// ✅ handle OPTIONS preflight properly
 app.options("*", cors());
 
 app.get("/", (req, res) => {
@@ -39,7 +36,7 @@ app.get("/", (req, res) => {
 
 app.use("/auth", authRoutes);
 
-// ✅ Get all users list (for chat list)
+// ✅ users list
 app.get("/users", async (req, res) => {
   try {
     const users = await User.find({}, { username: 1 }).sort({ username: 1 });
@@ -49,10 +46,11 @@ app.get("/users", async (req, res) => {
   }
 });
 
-// ✅ Get messages between 2 users (1-1)
+// ✅ 1-1 messages between two users
 app.get("/messages/:user1/:user2", async (req, res) => {
   try {
-    const { user1, user2 } = req.params;
+    const user1 = req.params.user1.toLowerCase();
+    const user2 = req.params.user2.toLowerCase();
 
     const msgs = await Message.find({
       $or: [
@@ -67,7 +65,7 @@ app.get("/messages/:user1/:user2", async (req, res) => {
   }
 });
 
-// ✅ SOCKET.IO with CORS
+// ✅ socket.io
 const io = new Server(server, {
   cors: {
     origin: FRONTEND_URL,
@@ -76,60 +74,49 @@ const io = new Server(server, {
   },
 });
 
-// store online users (username -> socketId)
-const onlineUsers = new Map();
-
 io.on("connection", (socket) => {
-  console.log("connected:", socket.id);
+  console.log("🟢 socket connected:", socket.id);
 
-  // ✅ user joins with username (VERY IMPORTANT)
   socket.on("join", (username) => {
     if (!username) return;
-
-    onlineUsers.set(username, socket.id);
-    socket.join(username); // room name = username
-    console.log(`✅ ${username} joined room: ${username}`);
+    const clean = username.toLowerCase().trim();
+    socket.join(clean);
+    console.log("✅ joined room:", clean);
   });
 
-  // ✅ send message only to receiver
   socket.on("send_message", async (data) => {
     try {
-      const { sender, receiver, message, time } = data;
+      const sender = data.sender?.toLowerCase().trim();
+      const receiver = data.receiver?.toLowerCase().trim();
+      const message = data.message?.trim();
+      const time = data.time;
 
       if (!sender || !receiver || !message) return;
 
-      const msg = await Message.create({
+      const saved = await Message.create({
         sender,
         receiver,
         message,
         time,
       });
 
-      // send to sender room (for instant update)
-      io.to(sender).emit("receive_message", msg);
-
-      // send to receiver room (THIS FIXES YOUR ISSUE)
-      io.to(receiver).emit("receive_message", msg);
+      // send to both rooms
+      io.to(sender).emit("receive_message", saved);
+      io.to(receiver).emit("receive_message", saved);
     } catch (err) {
-      console.log("send_message error:", err.message);
+      console.log("❌ send_message error:", err.message);
     }
   });
 
   socket.on("disconnect", () => {
-    for (let [user, id] of onlineUsers.entries()) {
-      if (id === socket.id) {
-        onlineUsers.delete(user);
-        console.log("❌ disconnected:", user);
-        break;
-      }
-    }
+    console.log("🔴 socket disconnected:", socket.id);
   });
 });
 
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log("Mongo connected ✅"))
-  .catch((err) => console.log("Mongo error ❌", err.message));
+  .then(() => console.log("✅ Mongo connected"))
+  .catch((err) => console.log("❌ Mongo error:", err.message));
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log("Server running on", PORT));
+server.listen(PORT, () => console.log("🚀 Server running on", PORT));
