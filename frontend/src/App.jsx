@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import io from "socket.io-client";
 
-import Inbox from "./pages/Inbox.jsx";
-import Chat from "./pages/Chat.jsx";
-import Auth from "./pages/Auth.jsx";
+import Inbox from "./pages/Inboox.jsx";
+import Chat from "./pages/Chaat.jsx";
+import Auth from "./pages/Auuth.jsx";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
