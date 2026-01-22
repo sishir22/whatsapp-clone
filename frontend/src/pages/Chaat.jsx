@@ -9,6 +9,10 @@ export default function Chat({ API_URL, me, socketRef, clearUnread }) {
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
 
+  // typing
+  const [typingUser, setTypingUser] = useState("");
+  const typingTimeoutRef = useRef(null);
+
   const chatRef = useRef(null);
 
   // load messages when opening chat
@@ -27,28 +31,36 @@ export default function Chat({ API_URL, me, socketRef, clearUnread }) {
 
     load();
     clearUnread(other);
-  }, [API_URL, me, other]);
+  }, [API_URL, me, other, clearUnread]);
 
-  // socket listener
+  // socket listeners
   useEffect(() => {
     if (!socketRef.current) return;
 
-    const handler = (msg) => {
+    const onMessage = (msg) => {
       const s = msg.sender?.toLowerCase();
       const r = msg.receiver?.toLowerCase();
 
-      const belongs =
-        (s === me && r === other) || (s === other && r === me);
-
-      if (belongs) {
-        setMessages((prev) => [...prev, msg]);
-      }
+      const belongs = (s === me && r === other) || (s === other && r === me);
+      if (belongs) setMessages((prev) => [...prev, msg]);
     };
 
-    socketRef.current.on("receive_message", handler);
+    const onTyping = ({ from }) => {
+      if (from?.toLowerCase() === other) setTypingUser(from);
+    };
+
+    const onStopTyping = ({ from }) => {
+      if (from?.toLowerCase() === other) setTypingUser("");
+    };
+
+    socketRef.current.on("receive_message", onMessage);
+    socketRef.current.on("typing", onTyping);
+    socketRef.current.on("stop_typing", onStopTyping);
 
     return () => {
-      socketRef.current?.off("receive_message", handler);
+      socketRef.current?.off("receive_message", onMessage);
+      socketRef.current?.off("typing", onTyping);
+      socketRef.current?.off("stop_typing", onStopTyping);
     };
   }, [me, other, socketRef]);
 
@@ -56,7 +68,7 @@ export default function Chat({ API_URL, me, socketRef, clearUnread }) {
   useEffect(() => {
     if (!chatRef.current) return;
     chatRef.current.scrollTop = chatRef.current.scrollHeight;
-  }, [messages]);
+  }, [messages, typingUser]);
 
   const sendMessage = () => {
     if (!message.trim()) return;
@@ -72,22 +84,55 @@ export default function Chat({ API_URL, me, socketRef, clearUnread }) {
     };
 
     socketRef.current.emit("send_message", payload);
+
+    // stop typing after sending
+    socketRef.current.emit("stop_typing", { from: me, to: other });
+
     setMessage("");
+  };
+
+  const handleTyping = (value) => {
+    setMessage(value);
+
+    if (!socketRef.current) return;
+
+    // emit typing immediately
+    socketRef.current.emit("typing", { from: me, to: other });
+
+    // clear old timeout
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    // stop typing after 1s of no input
+    typingTimeoutRef.current = setTimeout(() => {
+      socketRef.current.emit("stop_typing", { from: me, to: other });
+    }, 1000);
   };
 
   return (
     <div style={styles.page}>
       <div style={styles.phone}>
+        {/* Top */}
         <div style={styles.top}>
           <button style={styles.back} onClick={() => navigate("/")}>
             ←
           </button>
           <div>
             <div style={styles.title}>{other}</div>
-            <div style={styles.sub}>1-1 chat</div>
+            <div style={styles.sub}>
+              {typingUser ? (
+                <span style={styles.typing}>
+                  typing<span className="dot">.</span>
+                  <span className="dot">.</span>
+                  <span className="dot">.</span>
+                </span>
+              ) : (
+                "1-1 chat"
+              )}
+            </div>
           </div>
         </div>
 
+        {/* Messages */}
         <div ref={chatRef} style={styles.chatArea}>
           {messages.map((m) => {
             const isMe = m.sender?.toLowerCase() === me;
@@ -118,12 +163,13 @@ export default function Chat({ API_URL, me, socketRef, clearUnread }) {
           )}
         </div>
 
+        {/* Input */}
         <div style={styles.inputRow}>
           <input
             style={styles.input}
             placeholder="Type message..."
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => handleTyping(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && sendMessage()}
           />
           <button style={styles.send} onClick={sendMessage}>
@@ -131,6 +177,22 @@ export default function Chat({ API_URL, me, socketRef, clearUnread }) {
           </button>
         </div>
       </div>
+
+      {/* animation */}
+      <style>{`
+        @keyframes blink {
+          0% { opacity: 0.2; transform: translateY(0); }
+          50% { opacity: 1; transform: translateY(-2px); }
+          100% { opacity: 0.2; transform: translateY(0); }
+        }
+        .dot {
+          display: inline-block;
+          animation: blink 1s infinite;
+          margin-left: 2px;
+        }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
+      `}</style>
     </div>
   );
 }
@@ -182,6 +244,10 @@ const styles = {
   },
   title: { fontWeight: 900, fontSize: 16 },
   sub: { opacity: 0.7, fontSize: 12, marginTop: 2 },
+  typing: {
+    color: "rgba(0,255,200,0.95)",
+    fontWeight: 800,
+  },
   chatArea: {
     flex: 1,
     padding: 14,
