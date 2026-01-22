@@ -16,9 +16,8 @@ const server = http.createServer(app);
 
 app.use(express.json());
 
-const FRONTEND_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 
-// ✅ CORS
 app.use(
   cors({
     origin: FRONTEND_URL,
@@ -28,44 +27,42 @@ app.use(
   })
 );
 
-app.options("*", cors());
+app.options(/.*/, cors());
 
-app.get("/", (req, res) => {
-  res.send("Backend running ✅");
-});
+app.get("/", (req, res) => res.send("Backend running ✅"));
 
+// ✅ Auth routes
 app.use("/auth", authRoutes);
 
-// ✅ users list
+// ✅ Users list
 app.get("/users", async (req, res) => {
   try {
     const users = await User.find({}, { username: 1 }).sort({ username: 1 });
     res.json(users);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 
-// ✅ 1-1 messages between two users
-app.get("/messages/:user1/:user2", async (req, res) => {
+// ✅ Fetch 1-1 messages
+app.get("/messages/:u1/:u2", async (req, res) => {
   try {
-    const user1 = req.params.user1.toLowerCase();
-    const user2 = req.params.user2.toLowerCase();
+    const { u1, u2 } = req.params;
 
     const msgs = await Message.find({
       $or: [
-        { sender: user1, receiver: user2 },
-        { sender: user2, receiver: user1 },
+        { sender: u1, receiver: u2 },
+        { sender: u2, receiver: u1 },
       ],
     }).sort({ createdAt: 1 });
 
     res.json(msgs);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
 
-// ✅ socket.io
+// ---------------- SOCKET ----------------
 const io = new Server(server, {
   cors: {
     origin: FRONTEND_URL,
@@ -75,48 +72,53 @@ const io = new Server(server, {
 });
 
 io.on("connection", (socket) => {
-  console.log("🟢 socket connected:", socket.id);
+  console.log("🟢 connected:", socket.id);
 
+  // join personal room
   socket.on("join", (username) => {
-    if (!username) return;
-    const clean = username.toLowerCase().trim();
-    socket.join(clean);
-    console.log("✅ joined room:", clean);
+    socket.join(username);
+    console.log(`👤 ${username} joined personal room`);
   });
 
+  // send message
   socket.on("send_message", async (data) => {
     try {
-      const sender = data.sender?.toLowerCase().trim();
-      const receiver = data.receiver?.toLowerCase().trim();
-      const message = data.message?.trim();
-      const time = data.time;
-
-      if (!sender || !receiver || !message) return;
-
       const saved = await Message.create({
-        sender,
-        receiver,
-        message,
-        time,
+        sender: data.sender,
+        receiver: data.receiver,
+        message: data.message,
+        time: data.time,
+        deleted: false,
       });
 
-      // send to both rooms
-      io.to(sender).emit("receive_message", saved);
-      io.to(receiver).emit("receive_message", saved);
+      // send to both users
+      io.to(saved.sender).emit("receive_message", saved);
+      io.to(saved.receiver).emit("receive_message", saved);
     } catch (err) {
       console.log("❌ send_message error:", err.message);
     }
   });
 
+  // ✅ Typing indicator event
+  socket.on("typing", ({ from, to }) => {
+    // tell receiver: "from is typing"
+    io.to(to).emit("typing", { from });
+  });
+
+  // ✅ Stop typing event
+  socket.on("stop_typing", ({ from, to }) => {
+    io.to(to).emit("stop_typing", { from });
+  });
+
   socket.on("disconnect", () => {
-    console.log("🔴 socket disconnected:", socket.id);
+    console.log("🔴 disconnected:", socket.id);
   });
 });
 
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Mongo connected"))
-  .catch((err) => console.log("❌ Mongo error:", err.message));
+  .then(() => console.log("Mongo connected ✅"))
+  .catch((err) => console.log("Mongo error ❌", err.message));
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log("🚀 Server running on", PORT));
+server.listen(PORT, () => console.log("Server running on", PORT));
